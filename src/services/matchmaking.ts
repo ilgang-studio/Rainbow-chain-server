@@ -90,9 +90,13 @@ function attachHumanSocketsToRoom(io: SocketServer, roomId: string, players: Roo
   for (const player of players) {
     if (player.isBot || !player.socketId) continue;
     const socket = getSocket(io, player.socketId);
-    if (!socket) continue;
+    if (!socket) {
+      console.warn(`[room:join] socket not found for player ${player.guestId} (socketId: ${player.socketId})`);
+      continue;
+    }
     socket.join(roomId);
     socket.data.roomId = roomId;
+    console.log(`[room:join] ${player.guestId} joined room ${roomId} (socket: ${socket.id})`);
   }
 }
 
@@ -130,6 +134,8 @@ function createHumanMatch(
   attachHumanSocketsToRoom(io, room.roomId, room.players);
   updateMatchedSession(first.guestId, room.roomId);
   updateMatchedSession(second.guestId, room.roomId);
+
+  console.log(`[match:found] room ${room.roomId} created — players: ${first.guestId}, ${second.guestId}`);
 
   const firstSocket = getSocket(io, first.socketId);
   const secondSocket = getSocket(io, second.socketId);
@@ -309,8 +315,24 @@ export function createMatchmakingService(io: SocketServer): MatchmakingService {
         return;
       }
 
+      const humanCount = room.players.filter((p) => !p.isBot).length;
+      console.log(`[room:ready] ${guestId} ready in room ${roomId} (${room.readyGuestIds.size}/${humanCount})`);
+
       if (!wasStarted && room.started) {
-        io.to(room.roomId).emit("room:start", toRoomStartPayload(room));
+        const payload = toRoomStartPayload(room);
+        console.log(`[room:start] emitting to room ${roomId}, players:`, room.players.map((p) => `${p.guestId}(${p.socketId})`).join(", "));
+
+        // Direct emission per player — more reliable than io.to(roomId) which depends on room membership state
+        for (const player of room.players) {
+          if (player.isBot || !player.socketId) continue;
+          const playerSocket = getSocket(io, player.socketId);
+          if (!playerSocket) {
+            console.warn(`[room:start] socket not found for player ${player.guestId} (socketId: ${player.socketId})`);
+            continue;
+          }
+          playerSocket.emit("room:start", payload);
+          console.log(`[room:start] emitted to ${player.guestId}`);
+        }
       }
     },
 
