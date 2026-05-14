@@ -93,6 +93,30 @@ export interface RoomEndPayload {
   reason?: string;
 }
 
+export interface RematchRequestPayload {
+  roomId: string;
+}
+
+export interface RematchCancelPayload {
+  roomId: string;
+}
+
+export interface RematchWaitingPayload {
+  roomId: string;
+}
+
+export interface RematchAcceptedPayload {
+  roomId: string;
+}
+
+export interface RematchTimeoutPayload {
+  roomId: string;
+}
+
+export interface OpponentLeftPayload {
+  roomId: string;
+}
+
 export interface ClientToServerEvents {
   "queue:join": (payload: QueueJoinPayload) => void;
   "queue:cancel": () => void;
@@ -103,6 +127,8 @@ export interface ClientToServerEvents {
   "chain:warning": (payload: ChainWarningPayload) => void;
   "item:pickup": (payload: ItemPickupPayload) => void;
   "game:over": (payload: GameOverPayload) => void;
+  "rematch:request": (payload: RematchRequestPayload) => void;
+  "rematch:cancel": (payload: RematchCancelPayload) => void;
 }
 
 export interface ServerToClientEvents {
@@ -119,6 +145,10 @@ export interface ServerToClientEvents {
   "chain:warning": (payload: ChainWarningPayload) => void;
   "item:picked": (payload: ItemPickupPayload) => void;
   "room:end": (payload: RoomEndPayload) => void;
+  "rematch:waiting": (payload: RematchWaitingPayload) => void;
+  "rematch:accepted": (payload: RematchAcceptedPayload) => void;
+  "rematch:timeout": (payload: RematchTimeoutPayload) => void;
+  "opponent:left": (payload: OpponentLeftPayload) => void;
 }
 
 export interface InterServerEvents {}

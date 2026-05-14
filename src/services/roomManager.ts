@@ -81,6 +81,20 @@ export function markRoomReady(roomId: string, guestId: string): Room | undefined
   return room;
 }
 
+export function createRematchRoom(existingRoom: Room): Room {
+  const room: Room = {
+    roomId: randomUUID(),
+    mode: existingRoom.mode,
+    players: existingRoom.players.map((p) => ({ ...p })) as [RoomPlayer, RoomPlayer],
+    seed: createSeed(),
+    createdAt: Date.now(),
+    readyGuestIds: new Set<string>(),
+    started: true,
+  };
+  rooms.set(room.roomId, room);
+  return room;
+}
+
 export function toRoomStartPayload(room: Room): RoomStartPayload {
   return {
     roomId: room.roomId,

@@ -1,6 +1,7 @@
 import type { Server as HttpServer } from "node:http";
 import { Server } from "socket.io";
 import { createMatchmakingService } from "../services/matchmaking.js";
+import { createRematchService } from "../services/rematch.js";
 import { registerSocketHandlers } from "./handlers.js";
 import type {
   ClientToServerEvents,
@@ -18,9 +19,10 @@ export function setupSocket(server: HttpServer) {
   });
 
   const matchmaking = createMatchmakingService(io);
+  const rematch = createRematchService(io);
 
   io.on("connection", (socket) => {
-    registerSocketHandlers(socket, matchmaking);
+    registerSocketHandlers(socket, matchmaking, rematch);
   });
 
   return io;

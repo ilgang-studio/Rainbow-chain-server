@@ -6,12 +6,14 @@ import type {
   SocketData,
 } from "../types/events.js";
 import type { MatchmakingService } from "../services/matchmaking.js";
+import type { RematchService } from "../services/rematch.js";
 
 type ServerSocket = Socket<ClientToServerEvents, ServerToClientEvents, InterServerEvents, SocketData>;
 
 export function registerSocketHandlers(
   socket: ServerSocket,
   matchmaking: MatchmakingService,
+  rematch: RematchService,
 ): void {
   socket.on("queue:join", (payload) => {
     matchmaking.joinQueue(socket, payload);
@@ -26,7 +28,17 @@ export function registerSocketHandlers(
   });
 
   socket.on("disconnect", () => {
+    // rematch first: needs room lookup before matchmaking removes the room
+    rematch.handleDisconnect(socket);
     matchmaking.disconnect(socket);
+  });
+
+  socket.on("rematch:request", (payload) => {
+    rematch.requestRematch(socket, payload);
+  });
+
+  socket.on("rematch:cancel", (payload) => {
+    rematch.cancelRematch(socket, payload);
   });
 
   // Game relay — forward to the other player in the same room, no processing
