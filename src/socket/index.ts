@@ -13,7 +13,10 @@ import type {
 export function setupSocket(server: HttpServer) {
   const io = new Server<ClientToServerEvents, ServerToClientEvents, InterServerEvents, SocketData>(server, {
     cors: {
-      origin: "*",
+      origin: [
+        "http://localhost:5173",
+        "https://rainbow-chain.vercel.app",
+      ],
       methods: ["GET", "POST"],
     },
   });
