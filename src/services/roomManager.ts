@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { DEFAULT_BATTLE_CONFIG } from "../models/battle.js";
 import type { Room, RoomPlayer } from "../models/room.js";
 import type { RoomStartPayload } from "../types/events.js";
 
@@ -100,5 +101,6 @@ export function toRoomStartPayload(room: Room): RoomStartPayload {
     roomId: room.roomId,
     seed: room.seed,
     players: room.players.map(toPublicPlayer),
+    battleConfig: DEFAULT_BATTLE_CONFIG,
   };
 }

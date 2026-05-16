@@ -1,5 +1,6 @@
 import type { Server as HttpServer } from "node:http";
 import { Server } from "socket.io";
+import { createBattleService } from "../services/battle.js";
 import { createMatchmakingService } from "../services/matchmaking.js";
 import { createRematchService } from "../services/rematch.js";
 import { registerSocketHandlers } from "./handlers.js";
@@ -21,11 +22,12 @@ export function setupSocket(server: HttpServer) {
     },
   });
 
-  const matchmaking = createMatchmakingService(io);
-  const rematch = createRematchService(io);
+  const battle = createBattleService(io);
+  const matchmaking = createMatchmakingService(io, battle);
+  const rematch = createRematchService(io, battle);
 
   io.on("connection", (socket) => {
-    registerSocketHandlers(socket, matchmaking, rematch);
+    registerSocketHandlers(socket, matchmaking, rematch, battle);
   });
 
   return io;

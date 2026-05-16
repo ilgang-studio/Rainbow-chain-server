@@ -7,6 +7,7 @@ import type {
 } from "../types/events.js";
 import type { MatchmakingService } from "../services/matchmaking.js";
 import type { RematchService } from "../services/rematch.js";
+import type { BattleService } from "../services/battle.js";
 
 type ServerSocket = Socket<ClientToServerEvents, ServerToClientEvents, InterServerEvents, SocketData>;
 
@@ -14,6 +15,7 @@ export function registerSocketHandlers(
   socket: ServerSocket,
   matchmaking: MatchmakingService,
   rematch: RematchService,
+  battle: BattleService,
 ): void {
   socket.on("queue:join", (payload) => {
     matchmaking.joinQueue(socket, payload);
@@ -49,32 +51,18 @@ export function registerSocketHandlers(
   });
 
   socket.on("player:state", (payload) => {
-    const { roomId } = socket.data;
-    if (!roomId) return;
-    socket.to(roomId).emit("player:state", payload);
+    battle.syncPlayerState(socket, payload);
   });
 
-  socket.on("chain:spawn", (payload) => {
-    const { roomId } = socket.data;
-    if (!roomId) return;
-    socket.to(roomId).emit("chain:spawned", payload);
-  });
-
-  socket.on("chain:warning", (payload) => {
-    const { roomId } = socket.data;
-    if (!roomId) return;
-    socket.to(roomId).emit("chain:warning", payload);
+  socket.on("chain:cast", (payload) => {
+    battle.castChain(socket, payload);
   });
 
   socket.on("item:pickup", (payload) => {
-    const { roomId } = socket.data;
-    if (!roomId) return;
-    socket.to(roomId).emit("item:picked", payload);
+    battle.handleItemPickup(socket, payload);
   });
 
-  socket.on("game:over", (payload) => {
-    const { roomId } = socket.data;
-    if (!roomId) return;
-    socket.to(roomId).emit("room:end", payload);
+  socket.on("game:over", () => {
+    battle.handleGameOverClaim(socket);
   });
 }

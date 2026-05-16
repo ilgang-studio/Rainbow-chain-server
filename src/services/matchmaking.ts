@@ -20,6 +20,7 @@ import type {
   ServerToClientEvents,
   SocketData,
 } from "../types/events.js";
+import type { BattleService } from "./battle.js";
 
 type SocketServer = Server<ClientToServerEvents, ServerToClientEvents, InterServerEvents, SocketData>;
 type ServerSocket = Socket<ClientToServerEvents, ServerToClientEvents, InterServerEvents, SocketData>;
@@ -242,7 +243,7 @@ export interface MatchmakingService {
   disconnect: (socket: ServerSocket) => void;
 }
 
-export function createMatchmakingService(io: SocketServer): MatchmakingService {
+export function createMatchmakingService(io: SocketServer, battle: BattleService): MatchmakingService {
   return {
     joinQueue(socket, payload) {
       if (payload.mode !== "casual") {
@@ -333,6 +334,8 @@ export function createMatchmakingService(io: SocketServer): MatchmakingService {
           playerSocket.emit("room:start", payload);
           console.log(`[room:start] emitted to ${player.guestId}`);
         }
+
+        battle.startRoom(roomId);
       }
     },
 
@@ -346,6 +349,7 @@ export function createMatchmakingService(io: SocketServer): MatchmakingService {
       if (session?.roomId) {
         const removedRoom = removeGuestFromRooms(guestId);
         if (removedRoom) {
+          battle.disposeRoom(removedRoom.roomId);
           for (const player of removedRoom.players) {
             if (player.isBot || !player.socketId || player.guestId === guestId) continue;
             getSocket(io, player.socketId)?.emit("error", { message: "Opponent disconnected." });

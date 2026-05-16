@@ -1,4 +1,5 @@
 import type { QueueMode } from "./queue.js";
+import type { BattleState } from "./battle.js";
 
 export interface RoomPlayer {
   guestId: string;
@@ -21,4 +22,5 @@ export interface Room {
   createdAt: number;
   readyGuestIds: Set<string>;
   started: boolean;
+  battle?: BattleState;
 }

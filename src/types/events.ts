@@ -1,4 +1,5 @@
 import type { PublicRoomPlayer } from "../models/room.js";
+import type { BattleConfig, BattleStatus, ChainType } from "../models/battle.js";
 
 export interface QueueJoinPayload {
   mode: "casual";
@@ -41,13 +42,13 @@ export interface RoomStartPayload {
   roomId: string;
   seed: number;
   players: PublicRoomPlayer[];
+  battleConfig: BattleConfig;
 }
 
 export interface ErrorPayload {
   message: string;
 }
 
-// Game relay payloads — server relays as-is, no interpretation
 export interface PlayerMovePayload {
   x: number;
   y: number;
@@ -64,26 +65,79 @@ export interface PlayerStatePayload {
   t: number;
 }
 
-export interface ChainSpawnPayload {
-  chainId: string;
+export interface BattlePlayerSnapshot {
+  guestId: string;
   x: number;
   y: number;
-  color: string;
+  hp: number;
+  score: number;
+  heldChainType: ChainType | null;
+  alive: boolean;
+}
+
+export interface BattleItemSnapshot {
+  itemId: string;
+  chainType: ChainType;
+  x: number;
+  y: number;
+  active: boolean;
+  respawnAt: number | null;
+  pickedByGuestId: string | null;
+}
+
+export interface BattleStatePayload {
+  roomId: string;
+  status: BattleStatus;
+  players: BattlePlayerSnapshot[];
+  item: BattleItemSnapshot | null;
+  winnerGuestId: string | null;
+  reason?: string;
+  serverTime: number;
+}
+
+export interface ItemPickupRequestPayload {
+  itemId: string;
+  t: number;
+}
+
+export interface ItemSpawnedPayload {
+  itemId: string;
+  chainType: ChainType;
+  x: number;
+  y: number;
+  spawnedAt: number;
+}
+
+export interface ItemPickedPayload {
+  itemId: string;
+  pickedByGuestId: string;
+  chainType: ChainType;
+  respawnAt: number;
+}
+
+export interface ChainCastPayload {
+  dx: number;
+  dy: number;
   t: number;
 }
 
 export interface ChainWarningPayload {
   chainId: string;
-  t: number;
+  ownerGuestId: string;
+  chainType: ChainType;
+  originX: number;
+  originY: number;
+  dx: number;
+  dy: number;
+  warningAt: number;
+  fireAt: number;
 }
 
-export interface ItemPickupPayload {
-  itemId: string;
-  type: string;
-  t: number;
+export interface ChainSpawnPayload extends ChainWarningPayload {
+  firedAt: number;
 }
 
-export interface GameOverPayload {
+export interface GameOverClaimPayload {
   winnerGuestId: string | null;
   reason?: string;
 }
@@ -123,10 +177,9 @@ export interface ClientToServerEvents {
   "room:ready": (payload: RoomReadyPayload) => void;
   "player:move": (payload: PlayerMovePayload) => void;
   "player:state": (payload: PlayerStatePayload) => void;
-  "chain:spawn": (payload: ChainSpawnPayload) => void;
-  "chain:warning": (payload: ChainWarningPayload) => void;
-  "item:pickup": (payload: ItemPickupPayload) => void;
-  "game:over": (payload: GameOverPayload) => void;
+  "chain:cast": (payload: ChainCastPayload) => void;
+  "item:pickup": (payload: ItemPickupRequestPayload) => void;
+  "game:over": (payload: GameOverClaimPayload) => void;
   "rematch:request": (payload: RematchRequestPayload) => void;
   "rematch:cancel": (payload: RematchCancelPayload) => void;
 }
@@ -139,11 +192,13 @@ export interface ServerToClientEvents {
   "match:ai_fallback": (payload: MatchAiFallbackPayload) => void;
   "room:start": (payload: RoomStartPayload) => void;
   "error": (payload: ErrorPayload) => void;
+  "battle:state": (payload: BattleStatePayload) => void;
   "player:moved": (payload: PlayerMovePayload) => void;
   "player:state": (payload: PlayerStatePayload) => void;
+  "item:spawned": (payload: ItemSpawnedPayload) => void;
   "chain:spawned": (payload: ChainSpawnPayload) => void;
   "chain:warning": (payload: ChainWarningPayload) => void;
-  "item:picked": (payload: ItemPickupPayload) => void;
+  "item:picked": (payload: ItemPickedPayload) => void;
   "room:end": (payload: RoomEndPayload) => void;
   "rematch:waiting": (payload: RematchWaitingPayload) => void;
   "rematch:accepted": (payload: RematchAcceptedPayload) => void;

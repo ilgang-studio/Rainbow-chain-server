@@ -1,6 +1,7 @@
 import type { Server, Socket } from "socket.io";
 import { getRoom, createRematchRoom, removeRoom, toRoomStartPayload } from "./roomManager.js";
 import { sessions } from "./matchmaking.js";
+import type { BattleService } from "./battle.js";
 import type {
   ClientToServerEvents,
   InterServerEvents,
@@ -21,7 +22,7 @@ export interface RematchService {
   handleDisconnect: (socket: ServerSocket) => void;
 }
 
-export function createRematchService(io: SocketServer): RematchService {
+export function createRematchService(io: SocketServer, battle: BattleService): RematchService {
   // roomId -> Set of guestIds who requested rematch
   const rematchRequests = new Map<string, Set<string>>();
   // roomId -> cleanup timeout handle
@@ -71,6 +72,7 @@ export function createRematchService(io: SocketServer): RematchService {
       if (requests.size >= humanPlayers.length) {
         // Both players requested — start rematch
         clearRematchState(roomId);
+        battle.disposeRoom(roomId);
         removeRoom(roomId);
 
         const newRoom = createRematchRoom(room);
@@ -94,6 +96,8 @@ export function createRematchService(io: SocketServer): RematchService {
           playerSocket.emit("room:start", payload);
           console.log(`[rematch:accepted] room:start sent to ${player.guestId}`);
         }
+
+        battle.startRoom(newRoom.roomId);
       } else {
         // Waiting for the other player
         socket.emit("rematch:waiting", { roomId });
