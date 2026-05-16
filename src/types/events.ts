@@ -43,6 +43,8 @@ export interface RoomStartPayload {
   seed: number;
   players: PublicRoomPlayer[];
   battleConfig: BattleConfig;
+  initialBattleState: BattleStatePayload;
+  initialItem: ItemSpawnedPayload | null;
 }
 
 export interface ErrorPayload {

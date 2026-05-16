@@ -320,7 +320,16 @@ export function createMatchmakingService(io: SocketServer, battle: BattleService
       console.log(`[room:ready] ${guestId} ready in room ${roomId} (${room.readyGuestIds.size}/${humanCount})`);
 
       if (!wasStarted && room.started) {
-        const payload = toRoomStartPayload(room);
+        battle.startRoom(roomId, { emitInitialEvents: false });
+
+        const initialBattleState = battle.getBattleState(roomId);
+        const initialItem = battle.getCurrentItemSpawn(roomId);
+        if (!initialBattleState) {
+          emitError(socket, "Failed to initialize battle state.");
+          return;
+        }
+
+        const payload = toRoomStartPayload(room, initialBattleState, initialItem);
         console.log(`[room:start] emitting to room ${roomId}, players:`, room.players.map((p) => `${p.guestId}(${p.socketId})`).join(", "));
 
         // Direct emission per player — more reliable than io.to(roomId) which depends on room membership state
@@ -334,8 +343,6 @@ export function createMatchmakingService(io: SocketServer, battle: BattleService
           playerSocket.emit("room:start", payload);
           console.log(`[room:start] emitted to ${player.guestId}`);
         }
-
-        battle.startRoom(roomId);
       }
     },
 

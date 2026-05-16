@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { DEFAULT_BATTLE_CONFIG } from "../models/battle.js";
 import type { Room, RoomPlayer } from "../models/room.js";
-import type { RoomStartPayload } from "../types/events.js";
+import type { BattleStatePayload, ItemSpawnedPayload, RoomStartPayload } from "../types/events.js";
 
 export const rooms = new Map<string, Room>();
 
@@ -96,11 +96,17 @@ export function createRematchRoom(existingRoom: Room): Room {
   return room;
 }
 
-export function toRoomStartPayload(room: Room): RoomStartPayload {
+export function toRoomStartPayload(
+  room: Room,
+  initialBattleState: BattleStatePayload,
+  initialItem: ItemSpawnedPayload | null,
+): RoomStartPayload {
   return {
     roomId: room.roomId,
     seed: room.seed,
     players: room.players.map(toPublicPlayer),
     battleConfig: DEFAULT_BATTLE_CONFIG,
+    initialBattleState,
+    initialItem,
   };
 }

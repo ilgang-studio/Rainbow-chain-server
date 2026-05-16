@@ -34,12 +34,14 @@ const DEFAULT_HP = 3;
 const SPAWN_MARGIN = 96;
 
 export interface BattleService {
-  startRoom: (roomId: string) => void;
+  startRoom: (roomId: string, options?: { emitInitialEvents?: boolean }) => void;
   disposeRoom: (roomId: string) => void;
   syncPlayerState: (socket: ServerSocket, payload: PlayerStatePayload) => void;
   handleItemPickup: (socket: ServerSocket, payload: ItemPickupRequestPayload) => void;
   castChain: (socket: ServerSocket, payload: ChainCastPayload) => void;
   handleGameOverClaim: (socket: ServerSocket) => void;
+  getBattleState: (roomId: string) => BattleStatePayload | null;
+  getCurrentItemSpawn: (roomId: string) => ItemSpawnedPayload | null;
 }
 
 function nextRandom(state: BattleState): number {
@@ -88,6 +90,18 @@ function toBattleStatePayload(room: Room): BattleStatePayload {
     winnerGuestId: battle.winnerGuestId,
     reason: battle.endReason,
     serverTime: Date.now(),
+  };
+}
+
+function toItemSpawnedPayload(item: BattleItemState | null): ItemSpawnedPayload | null {
+  if (!item || !item.active) return null;
+
+  return {
+    itemId: item.itemId,
+    chainType: item.chainType,
+    x: item.x,
+    y: item.y,
+    spawnedAt: item.spawnedAt,
   };
 }
 
@@ -192,13 +206,8 @@ export function createBattleService(io: SocketServer): BattleService {
 
     battle.currentItem = item;
 
-    const payload: ItemSpawnedPayload = {
-      itemId: item.itemId,
-      chainType: item.chainType,
-      x: item.x,
-      y: item.y,
-      spawnedAt: item.spawnedAt,
-    };
+    const payload = toItemSpawnedPayload(item);
+    if (!payload) return;
 
     io.to(room.roomId).emit("item:spawned", payload);
     emitBattleState(room);
@@ -281,7 +290,7 @@ export function createBattleService(io: SocketServer): BattleService {
   }
 
   return {
-    startRoom(roomId) {
+    startRoom(roomId, options) {
       const room = getRoom(roomId);
       if (!room) return;
 
@@ -290,8 +299,32 @@ export function createBattleService(io: SocketServer): BattleService {
       }
 
       room.battle = createBattleState(room);
-      emitBattleState(room);
-      spawnItem(room);
+      const emitInitialEvents = options?.emitInitialEvents ?? true;
+
+      if (emitInitialEvents) {
+        emitBattleState(room);
+      }
+
+      if (emitInitialEvents) {
+        spawnItem(room);
+        return;
+      }
+
+      const battle = room.battle;
+      if (!battle) return;
+
+      const item: BattleItemState = {
+        itemId: randomUUID(),
+        chainType: pickChainType(battle),
+        x: SPAWN_MARGIN + nextRandom(battle) * (DEFAULT_BATTLE_CONFIG.worldWidth - SPAWN_MARGIN * 2),
+        y: SPAWN_MARGIN + nextRandom(battle) * (DEFAULT_BATTLE_CONFIG.worldHeight - SPAWN_MARGIN * 2),
+        active: true,
+        spawnedAt: Date.now(),
+        respawnAt: null,
+        pickedByGuestId: null,
+      };
+
+      battle.currentItem = item;
     },
 
     disposeRoom(roomId) {
@@ -426,6 +459,17 @@ export function createBattleService(io: SocketServer): BattleService {
       const roomId = socket.data.roomId;
       if (!roomId) return;
       emitError(socket, "game:over is now server authoritative. Wait for room:end.");
+    },
+
+    getBattleState(roomId) {
+      const room = getRoom(roomId);
+      if (!room?.battle) return null;
+      return toBattleStatePayload(room);
+    },
+
+    getCurrentItemSpawn(roomId) {
+      const room = getRoom(roomId);
+      return room?.battle ? toItemSpawnedPayload(room.battle.currentItem) : null;
     },
   };
 }
