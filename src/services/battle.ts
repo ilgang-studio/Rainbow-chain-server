@@ -105,12 +105,6 @@ function toItemSpawnedPayload(item: BattleItemState | null): ItemSpawnedPayload 
   };
 }
 
-function normalizeDirection(dx: number, dy: number): Vector2 | null {
-  const length = Math.hypot(dx, dy);
-  if (!Number.isFinite(length) || length === 0) return null;
-  return { x: dx / length, y: dy / length };
-}
-
 function distance(a: Vector2, b: Vector2): number {
   return Math.hypot(a.x - b.x, a.y - b.y);
 }
@@ -154,6 +148,50 @@ function createBattleState(room: Room): BattleState {
     chainHistory: [],
     winnerGuestId: null,
     chainTimeouts: new Map<string, NodeJS.Timeout>(),
+  };
+}
+
+function createRandomEnemyLaneChain(room: Room, ownerGuestId: string, chainType: ChainType): BattleChainState | null {
+  const battle = room.battle;
+  if (!battle) return null;
+
+  const ownerIndex = room.players.findIndex((player) => player.guestId === ownerGuestId);
+  const fallbackTargetIndex = ownerIndex === 0 ? 1 : 0;
+  const targetPlayer = room.players.find((player) => player.guestId !== ownerGuestId) ?? room.players[fallbackTargetIndex];
+  if (!targetPlayer) return null;
+
+  const targetIndex = room.players.findIndex((player) => player.guestId === targetPlayer.guestId);
+  const laneLeft = targetIndex <= 0 ? 0 : DEFAULT_BATTLE_CONFIG.worldWidth / 2;
+  const laneRight = laneLeft + DEFAULT_BATTLE_CONFIG.worldWidth / 2;
+  const laneTop = 0;
+  const laneBottom = DEFAULT_BATTLE_CONFIG.worldHeight;
+  const inset = SPAWN_MARGIN;
+  const useVertical = nextRandom(battle) < 0.5;
+
+  let origin: Vector2;
+  let direction: Vector2;
+
+  if (useVertical) {
+    const x = laneLeft + inset + nextRandom(battle) * ((laneRight - laneLeft) - inset * 2);
+    const fromTop = nextRandom(battle) < 0.5;
+    origin = { x, y: fromTop ? laneTop : laneBottom };
+    direction = { x: 0, y: fromTop ? 1 : -1 };
+  } else {
+    const y = laneTop + inset + nextRandom(battle) * ((laneBottom - laneTop) - inset * 2);
+    const fromLeft = nextRandom(battle) < 0.5;
+    origin = { x: fromLeft ? laneLeft : laneRight, y };
+    direction = { x: fromLeft ? 1 : -1, y: 0 };
+  }
+
+  return {
+    chainId: randomUUID(),
+    ownerGuestId,
+    chainType,
+    origin,
+    direction,
+    warningAt: Date.now(),
+    fireAt: Date.now() + DEFAULT_BATTLE_CONFIG.chainWarningMs,
+    fired: false,
   };
 }
 
@@ -411,25 +449,14 @@ export function createBattleService(io: SocketServer): BattleService {
         return;
       }
 
-      const direction = normalizeDirection(payload.dx, payload.dy);
-      if (!direction) {
-        emitError(socket, "Invalid chain direction.");
-        return;
-      }
-
       const chainType = player.heldChainType;
       player.heldChainType = null;
-
-      const chain: BattleChainState = {
-        chainId: randomUUID(),
-        ownerGuestId: guestId,
-        chainType,
-        origin: { x: player.x, y: player.y },
-        direction,
-        warningAt: Date.now(),
-        fireAt: Date.now() + DEFAULT_BATTLE_CONFIG.chainWarningMs,
-        fired: false,
-      };
+      const chain = createRandomEnemyLaneChain(room, guestId, chainType);
+      if (!chain) {
+        player.heldChainType = chainType;
+        emitError(socket, "Failed to create enemy arena chain.");
+        return;
+      }
 
       room.battle.chainHistory.push(chain);
 

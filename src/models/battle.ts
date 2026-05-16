@@ -1,4 +1,4 @@
-export const CHAIN_TYPES = ["red", "blue", "green", "yellow"] as const;
+export const CHAIN_TYPES = ["normal", "rush", "turn", "fake", "giant", "tracking", "phase"] as const;
 
 export type ChainType = (typeof CHAIN_TYPES)[number];
 export type BattleStatus = "idle" | "active" | "ended";
