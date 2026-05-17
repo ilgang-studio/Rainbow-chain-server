@@ -37,6 +37,8 @@ export function createHumanRoom(playerA: RoomPlayer, playerB: RoomPlayer): Room 
     started: false,
     roundWinnerGuestId: null,
     matchWinnerGuestId: null,
+    awayGuestIds: new Set<string>(),
+    awayTimeouts: new Map<string, NodeJS.Timeout>(),
   };
   rooms.set(room.roomId, room);
   return room;
@@ -65,6 +67,8 @@ export function createAiFallbackRoom(player: RoomPlayer): Room {
     started: false,
     roundWinnerGuestId: null,
     matchWinnerGuestId: null,
+    awayGuestIds: new Set<string>(),
+    awayTimeouts: new Map<string, NodeJS.Timeout>(),
   };
   rooms.set(room.roomId, room);
   return room;
@@ -116,6 +120,8 @@ export function createRematchRoom(existingRoom: Room): Room {
     started: true,
     roundWinnerGuestId: null,
     matchWinnerGuestId: null,
+    awayGuestIds: new Set<string>(),
+    awayTimeouts: new Map<string, NodeJS.Timeout>(),
   };
   rooms.set(room.roomId, room);
   return room;

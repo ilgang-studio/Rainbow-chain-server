@@ -31,6 +31,8 @@ export interface Room {
   started: boolean;
   roundWinnerGuestId: string | null;
   matchWinnerGuestId: string | null;
+  awayGuestIds: Set<string>;
+  awayTimeouts: Map<string, NodeJS.Timeout>;
   nextRoundTimeout?: NodeJS.Timeout;
   battle?: BattleState;
 }
