@@ -252,9 +252,20 @@ export function createMatchmakingService(io: SocketServer, battle: BattleService
         return;
       }
 
-      const guestId = payload.guestId.trim();
+      if (!socket.data.authenticated) {
+        emitError(socket, "Authenticated socket is required.");
+        return;
+      }
+
+      const guestId = socket.data.guestId?.trim();
       if (!guestId) {
-        emitError(socket, "guestId is required.");
+        emitError(socket, "Authenticated guestId is required.");
+        return;
+      }
+
+      const requestedGuestId = payload.guestId.trim();
+      if (requestedGuestId && requestedGuestId !== guestId) {
+        emitError(socket, "guestId mismatch with authenticated socket.");
         return;
       }
 
@@ -266,9 +277,12 @@ export function createMatchmakingService(io: SocketServer, battle: BattleService
 
       cancelQueueByGuestId(io, guestId, false);
 
-      const nickname = sanitizeNickname(payload.nickname) || generateGuestNickname();
+      const authenticatedNickname = socket.data.nickname ? sanitizeNickname(socket.data.nickname) : "";
+      const requestedNickname = sanitizeNickname(payload.nickname);
+      const nickname = authenticatedNickname || requestedNickname || generateGuestNickname();
       const joinedAt = Date.now();
       socket.data.guestId = guestId;
+      socket.data.nickname = nickname;
 
       sessions.set(guestId, {
         guestId,

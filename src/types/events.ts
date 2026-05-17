@@ -272,5 +272,8 @@ export interface InterServerEvents {}
 
 export interface SocketData {
   guestId?: string;
+  nickname?: string;
   roomId?: string;
+  authSubject?: string;
+  authenticated?: boolean;
 }

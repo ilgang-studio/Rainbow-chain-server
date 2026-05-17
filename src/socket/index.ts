@@ -3,6 +3,7 @@ import { Server } from "socket.io";
 import { createBattleService } from "../services/battle.js";
 import { createMatchmakingService } from "../services/matchmaking.js";
 import { createRematchService } from "../services/rematch.js";
+import { attachSocketJwtAuth } from "./auth.js";
 import { registerSocketHandlers } from "./handlers.js";
 import type {
   ClientToServerEvents,
@@ -25,6 +26,16 @@ export function setupSocket(server: HttpServer) {
   const battle = createBattleService(io);
   const matchmaking = createMatchmakingService(io, battle);
   const rematch = createRematchService(io, battle);
+
+  io.use((socket, next) => {
+    try {
+      attachSocketJwtAuth(socket);
+      next();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Socket authentication failed.";
+      next(new Error(message));
+    }
+  });
 
   io.on("connection", (socket) => {
     registerSocketHandlers(socket, matchmaking, rematch, battle);
