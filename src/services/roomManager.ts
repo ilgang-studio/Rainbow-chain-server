@@ -17,36 +17,54 @@ function toPublicPlayer(player: RoomPlayer) {
   };
 }
 
+function createInitialScore(players: readonly RoomPlayer[]): Record<string, number> {
+  return Object.fromEntries(players.map((player) => [player.guestId, 0]));
+}
+
 export function createHumanRoom(playerA: RoomPlayer, playerB: RoomPlayer): Room {
+  const players: [RoomPlayer, RoomPlayer] = [playerA, playerB];
   const room: Room = {
     roomId: randomUUID(),
     mode: "casual",
-    players: [playerA, playerB],
+    players,
     seed: createSeed(),
+    currentRound: 1,
+    score: createInitialScore(players),
+    roundState: "waiting",
+    encounter: "pvp",
     createdAt: Date.now(),
     readyGuestIds: new Set<string>(),
     started: false,
+    roundWinnerGuestId: null,
+    matchWinnerGuestId: null,
   };
   rooms.set(room.roomId, room);
   return room;
 }
 
 export function createAiFallbackRoom(player: RoomPlayer): Room {
+  const players: [RoomPlayer, RoomPlayer] = [
+    player,
+    {
+      guestId: `ai:${randomUUID()}`,
+      nickname: "AI Opponent",
+      isBot: true,
+    },
+  ];
   const room: Room = {
     roomId: randomUUID(),
     mode: "casual",
-    players: [
-      player,
-      {
-        guestId: `ai:${randomUUID()}`,
-        nickname: "AI Opponent",
-        isBot: true,
-      },
-    ],
+    players,
     seed: createSeed(),
+    currentRound: 1,
+    score: createInitialScore(players),
+    roundState: "waiting",
+    encounter: "ai",
     createdAt: Date.now(),
     readyGuestIds: new Set<string>(),
     started: false,
+    roundWinnerGuestId: null,
+    matchWinnerGuestId: null,
   };
   rooms.set(room.roomId, room);
   return room;
@@ -83,14 +101,21 @@ export function markRoomReady(roomId: string, guestId: string): Room | undefined
 }
 
 export function createRematchRoom(existingRoom: Room): Room {
+  const players = existingRoom.players.map((p) => ({ ...p })) as [RoomPlayer, RoomPlayer];
   const room: Room = {
     roomId: randomUUID(),
     mode: existingRoom.mode,
-    players: existingRoom.players.map((p) => ({ ...p })) as [RoomPlayer, RoomPlayer],
+    players,
     seed: createSeed(),
+    currentRound: 1,
+    score: createInitialScore(players),
+    roundState: "playing",
+    encounter: existingRoom.encounter,
     createdAt: Date.now(),
     readyGuestIds: new Set<string>(),
     started: true,
+    roundWinnerGuestId: null,
+    matchWinnerGuestId: null,
   };
   rooms.set(room.roomId, room);
   return room;
@@ -104,9 +129,16 @@ export function toRoomStartPayload(
   return {
     roomId: room.roomId,
     seed: room.seed,
+    currentSeed: room.seed,
+    round: room.currentRound,
+    roundState: room.roundState,
+    encounter: room.encounter,
+    score: { ...room.score },
     players: room.players.map(toPublicPlayer),
     battleConfig: DEFAULT_BATTLE_CONFIG,
     initialBattleState,
     initialItem,
+    roundWinnerGuestId: room.roundWinnerGuestId,
+    matchWinnerGuestId: room.matchWinnerGuestId,
   };
 }

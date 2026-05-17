@@ -320,16 +320,13 @@ export function createMatchmakingService(io: SocketServer, battle: BattleService
       console.log(`[room:ready] ${guestId} ready in room ${roomId} (${room.readyGuestIds.size}/${humanCount})`);
 
       if (!wasStarted && room.started) {
-        battle.startRoom(roomId, { emitInitialEvents: false });
-
-        const initialBattleState = battle.getBattleState(roomId);
-        const initialItem = battle.getCurrentItemSpawn(roomId);
-        if (!initialBattleState) {
+        const roundStart = battle.startRoom(roomId, { emitInitialEvents: false });
+        if (!roundStart) {
           emitError(socket, "Failed to initialize battle state.");
           return;
         }
 
-        const payload = toRoomStartPayload(room, initialBattleState, initialItem);
+        const payload = toRoomStartPayload(room, roundStart.initialBattleState, roundStart.initialItem);
         console.log(`[room:start] emitting to room ${roomId}, players:`, room.players.map((p) => `${p.guestId}(${p.socketId})`).join(", "));
 
         // Direct emission per player — more reliable than io.to(roomId) which depends on room membership state
@@ -343,6 +340,8 @@ export function createMatchmakingService(io: SocketServer, battle: BattleService
           playerSocket.emit("room:start", payload);
           console.log(`[room:start] emitted to ${player.guestId}`);
         }
+
+        console.log(`[round:start] room=${roomId} round=${room.currentRound} seed=${room.seed} score=${JSON.stringify(room.score)}`);
       }
     },
 
@@ -354,13 +353,10 @@ export function createMatchmakingService(io: SocketServer, battle: BattleService
 
       const session = sessions.get(guestId);
       if (session?.roomId) {
+        battle.handleDisconnect(session.roomId, guestId);
         const removedRoom = removeGuestFromRooms(guestId);
         if (removedRoom) {
           battle.disposeRoom(removedRoom.roomId);
-          for (const player of removedRoom.players) {
-            if (player.isBot || !player.socketId || player.guestId === guestId) continue;
-            getSocket(io, player.socketId)?.emit("error", { message: "Opponent disconnected." });
-          }
         }
       }
 

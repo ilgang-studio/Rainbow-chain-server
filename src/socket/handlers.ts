@@ -54,15 +54,19 @@ export function registerSocketHandlers(
     battle.syncPlayerState(socket, payload);
   });
 
-  socket.on("chain:cast", (payload) => {
-    battle.castChain(socket, payload);
+  socket.on("chain:cast", () => {
+    battle.castChain(socket);
+  });
+
+  socket.on("chain:request", () => {
+    battle.castChain(socket);
   });
 
   socket.on("item:pickup", (payload) => {
     battle.handleItemPickup(socket, payload);
   });
 
-  socket.on("game:over", () => {
-    battle.handleGameOverClaim(socket);
+  socket.on("game:over", (payload) => {
+    battle.handleGameOverClaim(socket, payload);
   });
 }

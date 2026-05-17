@@ -1,6 +1,9 @@
 import type { QueueMode } from "./queue.js";
 import type { BattleState } from "./battle.js";
 
+export type RoundState = "waiting" | "playing" | "round_end" | "match_end";
+export type EncounterType = "pvp" | "ai";
+
 export interface RoomPlayer {
   guestId: string;
   nickname: string;
@@ -19,8 +22,15 @@ export interface Room {
   mode: QueueMode;
   players: [RoomPlayer, RoomPlayer];
   seed: number;
+  currentRound: number;
+  score: Record<string, number>;
+  roundState: RoundState;
+  encounter: EncounterType;
   createdAt: number;
   readyGuestIds: Set<string>;
   started: boolean;
+  roundWinnerGuestId: string | null;
+  matchWinnerGuestId: string | null;
+  nextRoundTimeout?: NodeJS.Timeout;
   battle?: BattleState;
 }

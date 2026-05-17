@@ -11,18 +11,20 @@ import type {
 import { CHAIN_TYPES, DEFAULT_BATTLE_CONFIG } from "../models/battle.js";
 import type { Room } from "../models/room.js";
 import { getRoom } from "./roomManager.js";
+import { toRoomStartPayload } from "./roomManager.js";
 import type {
   BattleStatePayload,
-  ChainCastPayload,
   ChainSpawnPayload,
   ChainWarningPayload,
   ClientToServerEvents,
+  GameOverClaimPayload,
   InterServerEvents,
   ItemPickupRequestPayload,
   ItemPickedPayload,
   ItemSpawnedPayload,
+  MatchEndPayload,
   PlayerStatePayload,
-  RoomEndPayload,
+  RoundEndPayload,
   ServerToClientEvents,
   SocketData,
 } from "../types/events.js";
@@ -31,17 +33,27 @@ type SocketServer = Server<ClientToServerEvents, ServerToClientEvents, InterServ
 type ServerSocket = Socket<ClientToServerEvents, ServerToClientEvents, InterServerEvents, SocketData>;
 
 const DEFAULT_HP = 3;
+const MATCH_WIN_SCORE = 2;
+const NEXT_ROUND_DELAY_MS = 2_000;
 const SPAWN_MARGIN = 96;
 
 export interface BattleService {
-  startRoom: (roomId: string, options?: { emitInitialEvents?: boolean }) => void;
+  startRoom: (
+    roomId: string,
+    options?: { emitInitialEvents?: boolean; advanceRound?: boolean; startEvent?: "round:start" | null },
+  ) => { initialBattleState: BattleStatePayload; initialItem: ItemSpawnedPayload | null } | null;
   disposeRoom: (roomId: string) => void;
   syncPlayerState: (socket: ServerSocket, payload: PlayerStatePayload) => void;
   handleItemPickup: (socket: ServerSocket, payload: ItemPickupRequestPayload) => void;
-  castChain: (socket: ServerSocket, payload: ChainCastPayload) => void;
-  handleGameOverClaim: (socket: ServerSocket) => void;
+  castChain: (socket: ServerSocket) => void;
+  handleGameOverClaim: (socket: ServerSocket, payload: GameOverClaimPayload) => void;
+  handleDisconnect: (roomId: string, guestId: string) => void;
   getBattleState: (roomId: string) => BattleStatePayload | null;
   getCurrentItemSpawn: (roomId: string) => ItemSpawnedPayload | null;
+}
+
+function createSeed(): number {
+  return Math.floor(Math.random() * 2_147_483_647);
 }
 
 function nextRandom(state: BattleState): number {
@@ -49,60 +61,6 @@ function nextRandom(state: BattleState): number {
   t = Math.imul(t ^ (t >>> 15), t | 1);
   t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
   return ((t ^ (t >>> 14)) >>> 0) / 4_294_967_296;
-}
-
-function toBattleStatePayload(room: Room): BattleStatePayload {
-  const battle = room.battle;
-  if (!battle) {
-    return {
-      roomId: room.roomId,
-      status: "idle",
-      players: [],
-      item: null,
-      winnerGuestId: null,
-      serverTime: Date.now(),
-    };
-  }
-
-  return {
-    roomId: room.roomId,
-    status: battle.status,
-    players: Object.values(battle.players).map((player) => ({
-      guestId: player.guestId,
-      x: player.x,
-      y: player.y,
-      hp: player.hp,
-      score: player.score,
-      heldChainType: player.heldChainType,
-      alive: player.alive,
-    })),
-    item: battle.currentItem
-      ? {
-          itemId: battle.currentItem.itemId,
-          chainType: battle.currentItem.chainType,
-          x: battle.currentItem.x,
-          y: battle.currentItem.y,
-          active: battle.currentItem.active,
-          respawnAt: battle.currentItem.respawnAt,
-          pickedByGuestId: battle.currentItem.pickedByGuestId,
-        }
-      : null,
-    winnerGuestId: battle.winnerGuestId,
-    reason: battle.endReason,
-    serverTime: Date.now(),
-  };
-}
-
-function toItemSpawnedPayload(item: BattleItemState | null): ItemSpawnedPayload | null {
-  if (!item || !item.active) return null;
-
-  return {
-    itemId: item.itemId,
-    chainType: item.chainType,
-    x: item.x,
-    y: item.y,
-    spawnedAt: item.spawnedAt,
-  };
 }
 
 function distance(a: Vector2, b: Vector2): number {
@@ -122,13 +80,13 @@ function pointToRayDistance(point: Vector2, origin: Vector2, direction: Vector2)
   return Math.hypot(point.x - closestX, point.y - closestY);
 }
 
-function createPlayerState(guestId: string, index: number): BattlePlayerState {
+function createPlayerState(room: Room, guestId: string, index: number): BattlePlayerState {
   return {
     guestId,
     x: index === 0 ? DEFAULT_BATTLE_CONFIG.worldWidth * 0.25 : DEFAULT_BATTLE_CONFIG.worldWidth * 0.75,
     y: DEFAULT_BATTLE_CONFIG.worldHeight * 0.5,
     hp: DEFAULT_HP,
-    score: 0,
+    score: room.score[guestId] ?? 0,
     heldChainType: null,
     alive: true,
     lastUpdateAt: Date.now(),
@@ -137,7 +95,7 @@ function createPlayerState(guestId: string, index: number): BattlePlayerState {
 
 function createBattleState(room: Room): BattleState {
   const players = Object.fromEntries(
-    room.players.map((player, index) => [player.guestId, createPlayerState(player.guestId, index)]),
+    room.players.map((player, index) => [player.guestId, createPlayerState(room, player.guestId, index)]),
   ) as Record<string, BattlePlayerState>;
 
   return {
@@ -148,6 +106,88 @@ function createBattleState(room: Room): BattleState {
     chainHistory: [],
     winnerGuestId: null,
     chainTimeouts: new Map<string, NodeJS.Timeout>(),
+  };
+}
+
+function toItemSpawnedPayload(item: BattleItemState | null): ItemSpawnedPayload | null {
+  if (!item || !item.active) return null;
+
+  return {
+    itemId: item.itemId,
+    chainType: item.chainType,
+    x: item.x,
+    y: item.y,
+    spawnedAt: item.spawnedAt,
+  };
+}
+
+function toBattleStatePayload(room: Room): BattleStatePayload {
+  const battle = room.battle;
+  if (!battle) {
+    return {
+      roomId: room.roomId,
+      round: room.currentRound,
+      roundState: room.roundState,
+      seed: room.seed,
+      score: { ...room.score },
+      status: "idle",
+      players: [],
+      item: null,
+      winnerGuestId: null,
+      roundWinnerGuestId: room.roundWinnerGuestId,
+      matchWinnerGuestId: room.matchWinnerGuestId,
+      serverTime: Date.now(),
+    };
+  }
+
+  return {
+    roomId: room.roomId,
+    round: room.currentRound,
+    roundState: room.roundState,
+    seed: room.seed,
+    score: { ...room.score },
+    status: battle.status,
+    players: Object.values(battle.players).map((player) => ({
+      guestId: player.guestId,
+      x: player.x,
+      y: player.y,
+      hp: player.hp,
+      score: room.score[player.guestId] ?? 0,
+      heldChainType: player.heldChainType,
+      alive: player.alive,
+    })),
+    item: battle.currentItem
+      ? {
+          itemId: battle.currentItem.itemId,
+          chainType: battle.currentItem.chainType,
+          x: battle.currentItem.x,
+          y: battle.currentItem.y,
+          active: battle.currentItem.active,
+          respawnAt: battle.currentItem.respawnAt,
+          pickedByGuestId: battle.currentItem.pickedByGuestId,
+        }
+      : null,
+    winnerGuestId: battle.winnerGuestId,
+    roundWinnerGuestId: room.roundWinnerGuestId,
+    matchWinnerGuestId: room.matchWinnerGuestId,
+    reason: battle.endReason,
+    serverTime: Date.now(),
+  };
+}
+
+function createRandomItem(battle: BattleState): BattleItemState {
+  const chainIndex = Math.floor(nextRandom(battle) * CHAIN_TYPES.length);
+  const chainType = CHAIN_TYPES[chainIndex] ?? CHAIN_TYPES[0];
+
+  return {
+    itemId: randomUUID(),
+    chainType,
+    x: SPAWN_MARGIN + nextRandom(battle) * (DEFAULT_BATTLE_CONFIG.worldWidth - SPAWN_MARGIN * 2),
+    y: SPAWN_MARGIN + nextRandom(battle) * (DEFAULT_BATTLE_CONFIG.worldHeight - SPAWN_MARGIN * 2),
+    active: true,
+    spawnedAt: Date.now(),
+    respawnAt: null,
+    pickedByGuestId: null,
   };
 }
 
@@ -196,52 +236,88 @@ function createRandomEnemyLaneChain(room: Room, ownerGuestId: string, chainType:
 }
 
 export function createBattleService(io: SocketServer): BattleService {
-  function emitBattleState(room: Room): void {
-    io.to(room.roomId).emit("battle:state", toBattleStatePayload(room));
-  }
-
   function emitError(socket: ServerSocket, message: string): void {
     socket.emit("error", { message });
   }
 
+  function emitBattleState(room: Room): void {
+    io.to(room.roomId).emit("battle:state", toBattleStatePayload(room));
+  }
+
   function ensureActiveRoom(roomId: string): Room | undefined {
     const room = getRoom(roomId);
-    if (!room?.battle || room.battle.status !== "active") return undefined;
+    if (!room?.battle || room.roundState !== "playing" || room.battle.status !== "active") return undefined;
     return room;
   }
 
-  function clearBattleTimers(battle: BattleState): void {
-    if (battle.respawnTimeout) {
+  function clearBattleTimers(room: Room): void {
+    const battle = room.battle;
+    if (battle?.respawnTimeout) {
       clearTimeout(battle.respawnTimeout);
       delete battle.respawnTimeout;
     }
 
-    for (const timeout of battle.chainTimeouts.values()) {
+    for (const timeout of battle?.chainTimeouts.values() ?? []) {
       clearTimeout(timeout);
     }
-    battle.chainTimeouts.clear();
+    battle?.chainTimeouts.clear();
+
+    if (room.nextRoundTimeout) {
+      clearTimeout(room.nextRoundTimeout);
+      delete room.nextRoundTimeout;
+    }
   }
 
-  function pickChainType(battle: BattleState): ChainType {
-    const index = Math.floor(nextRandom(battle) * CHAIN_TYPES.length);
-    return CHAIN_TYPES[index] ?? CHAIN_TYPES[0];
+  function syncBattleScores(room: Room): void {
+    if (!room.battle) return;
+
+    for (const player of Object.values(room.battle.players)) {
+      player.score = room.score[player.guestId] ?? 0;
+    }
+  }
+
+  function initializeRound(room: Room, options?: { advanceRound?: boolean }): {
+    initialBattleState: BattleStatePayload;
+    initialItem: ItemSpawnedPayload | null;
+  } {
+    clearBattleTimers(room);
+
+    if (options?.advanceRound) {
+      room.currentRound += 1;
+      room.seed = createSeed();
+    }
+
+    room.roundState = "playing";
+    room.roundWinnerGuestId = null;
+    room.matchWinnerGuestId = null;
+    room.battle = createBattleState(room);
+    room.battle.currentItem = createRandomItem(room.battle);
+
+    return {
+      initialBattleState: toBattleStatePayload(room),
+      initialItem: toItemSpawnedPayload(room.battle.currentItem),
+    };
+  }
+
+  function logRoundStart(room: Room): void {
+    console.log(
+      `[round:start] room=${room.roomId} round=${room.currentRound} seed=${room.seed} score=${JSON.stringify(room.score)}`,
+    );
+  }
+
+  function emitRoundStart(room: Room): void {
+    const initialBattleState = toBattleStatePayload(room);
+    const initialItem = toItemSpawnedPayload(room.battle?.currentItem ?? null);
+    const payload = toRoomStartPayload(room, initialBattleState, initialItem);
+    io.to(room.roomId).emit("round:start", payload);
+    logRoundStart(room);
   }
 
   function spawnItem(room: Room): void {
     const battle = room.battle;
-    if (!battle || battle.status !== "active") return;
+    if (!battle || room.roundState !== "playing" || battle.status !== "active") return;
 
-    const item: BattleItemState = {
-      itemId: randomUUID(),
-      chainType: pickChainType(battle),
-      x: SPAWN_MARGIN + nextRandom(battle) * (DEFAULT_BATTLE_CONFIG.worldWidth - SPAWN_MARGIN * 2),
-      y: SPAWN_MARGIN + nextRandom(battle) * (DEFAULT_BATTLE_CONFIG.worldHeight - SPAWN_MARGIN * 2),
-      active: true,
-      spawnedAt: Date.now(),
-      respawnAt: null,
-      pickedByGuestId: null,
-    };
-
+    const item = createRandomItem(battle);
     battle.currentItem = item;
 
     const payload = toItemSpawnedPayload(item);
@@ -253,7 +329,7 @@ export function createBattleService(io: SocketServer): BattleService {
 
   function scheduleItemRespawn(room: Room): void {
     const battle = room.battle;
-    if (!battle || battle.status !== "active") return;
+    if (!battle || room.roundState !== "playing" || battle.status !== "active") return;
 
     if (battle.respawnTimeout) {
       clearTimeout(battle.respawnTimeout);
@@ -264,23 +340,86 @@ export function createBattleService(io: SocketServer): BattleService {
     }, DEFAULT_BATTLE_CONFIG.itemRespawnMs);
   }
 
-  function endBattle(room: Room, winnerGuestId: string | null, reason: string): void {
-    const battle = room.battle;
-    if (!battle || battle.status === "ended") return;
+  function scheduleNextRound(room: Room): void {
+    room.nextRoundTimeout = setTimeout(() => {
+      const currentRoom = getRoom(room.roomId);
+      if (!currentRoom || currentRoom.roundState === "match_end") return;
 
-    battle.status = "ended";
-    battle.winnerGuestId = winnerGuestId;
-    battle.endReason = reason;
-    clearBattleTimers(battle);
+      initializeRound(currentRoom, { advanceRound: true });
+      emitRoundStart(currentRoom);
+    }, NEXT_ROUND_DELAY_MS);
+  }
 
-    const payload: RoomEndPayload = { winnerGuestId, reason };
-    io.to(room.roomId).emit("room:end", payload);
+  function concludeMatch(room: Room, winnerGuestId: string | null, reason: string): void {
+    room.roundState = "match_end";
+    room.matchWinnerGuestId = winnerGuestId;
+    syncBattleScores(room);
     emitBattleState(room);
+
+    const payload: MatchEndPayload = {
+      roomId: room.roomId,
+      winnerGuestId,
+      score: { ...room.score },
+      reason,
+    };
+
+    io.to(room.roomId).emit("match:end", payload);
+    io.to(room.roomId).emit("room:end", { winnerGuestId, reason });
+    console.log(
+      `[match:end] room=${room.roomId} winner=${winnerGuestId ?? "none"} score=${JSON.stringify(room.score)} reason=${reason}`,
+    );
+  }
+
+  function finishRound(room: Room, winnerGuestId: string | null, reason: string, source: string): void {
+    if (room.roundState !== "playing") {
+      console.log(`[duplicate ignored] room=${room.roomId} round=${room.currentRound} source=${source}`);
+      return;
+    }
+
+    room.roundState = "round_end";
+    room.roundWinnerGuestId = winnerGuestId;
+
+    const battle = room.battle;
+    if (battle) {
+      battle.status = "ended";
+      battle.winnerGuestId = winnerGuestId;
+      battle.endReason = reason;
+    }
+
+    clearBattleTimers(room);
+
+    if (winnerGuestId && winnerGuestId in room.score) {
+      room.score[winnerGuestId] += 1;
+    }
+    syncBattleScores(room);
+
+    const loserGuestId = room.players.find((player) => player.guestId !== winnerGuestId)?.guestId ?? null;
+    const payload: RoundEndPayload = {
+      roomId: room.roomId,
+      round: room.currentRound,
+      winnerGuestId,
+      loserGuestId,
+      score: { ...room.score },
+      reason,
+    };
+
+    io.to(room.roomId).emit("round:end", payload);
+    emitBattleState(room);
+    console.log(
+      `[round:end] room=${room.roomId} round=${room.currentRound} winner=${winnerGuestId ?? "none"} score=${JSON.stringify(room.score)} reason=${reason}`,
+    );
+
+    if (winnerGuestId && (room.score[winnerGuestId] ?? 0) >= MATCH_WIN_SCORE) {
+      concludeMatch(room, winnerGuestId, reason);
+      return;
+    }
+
+    scheduleNextRound(room);
   }
 
   function resolveChainHit(room: Room, chain: BattleChainState): void {
     const battle = room.battle;
-    if (!battle || battle.status !== "active") return;
+    if (!battle || room.roundState !== "playing" || battle.status !== "active") return;
 
     const owner = battle.players[chain.ownerGuestId];
     if (!owner) return;
@@ -293,10 +432,9 @@ export function createBattleService(io: SocketServer): BattleService {
 
       target.hp = Math.max(0, target.hp - 1);
       target.alive = target.hp > 0;
-      owner.score += 1;
 
       if (!target.alive) {
-        endBattle(room, owner.guestId, "chain-hit");
+        finishRound(room, owner.guestId, "chain-hit", "chain-hit");
         return;
       }
     }
@@ -306,7 +444,7 @@ export function createBattleService(io: SocketServer): BattleService {
 
   function fireChain(room: Room, chain: BattleChainState): void {
     const battle = room.battle;
-    if (!battle || battle.status !== "active") return;
+    if (!battle || room.roundState !== "playing" || battle.status !== "active") return;
 
     chain.fired = true;
     const payload: ChainSpawnPayload = {
@@ -324,52 +462,37 @@ export function createBattleService(io: SocketServer): BattleService {
 
     io.to(room.roomId).emit("chain:spawned", payload);
     battle.chainTimeouts.delete(chain.chainId);
+    console.log(
+      `[chain:spawned] room=${room.roomId} round=${room.currentRound} chain=${chain.chainId} owner=${chain.ownerGuestId} type=${chain.chainType}`,
+    );
     resolveChainHit(room, chain);
   }
 
   return {
     startRoom(roomId, options) {
       const room = getRoom(roomId);
-      if (!room) return;
+      if (!room) return null;
 
-      if (room.battle) {
-        clearBattleTimers(room.battle);
-      }
+      const initialized = initializeRound(room, { advanceRound: options?.advanceRound });
 
-      room.battle = createBattleState(room);
-      const emitInitialEvents = options?.emitInitialEvents ?? true;
-
-      if (emitInitialEvents) {
+      if (options?.emitInitialEvents) {
+        if (initialized.initialItem) {
+          io.to(room.roomId).emit("item:spawned", initialized.initialItem);
+        }
         emitBattleState(room);
       }
 
-      if (emitInitialEvents) {
-        spawnItem(room);
-        return;
+      if (options?.startEvent === "round:start") {
+        emitRoundStart(room);
       }
 
-      const battle = room.battle;
-      if (!battle) return;
-
-      const item: BattleItemState = {
-        itemId: randomUUID(),
-        chainType: pickChainType(battle),
-        x: SPAWN_MARGIN + nextRandom(battle) * (DEFAULT_BATTLE_CONFIG.worldWidth - SPAWN_MARGIN * 2),
-        y: SPAWN_MARGIN + nextRandom(battle) * (DEFAULT_BATTLE_CONFIG.worldHeight - SPAWN_MARGIN * 2),
-        active: true,
-        spawnedAt: Date.now(),
-        respawnAt: null,
-        pickedByGuestId: null,
-      };
-
-      battle.currentItem = item;
+      return initialized;
     },
 
     disposeRoom(roomId) {
       const room = getRoom(roomId);
-      const battle = room?.battle;
-      if (!battle) return;
-      clearBattleTimers(battle);
+      if (!room) return;
+      clearBattleTimers(room);
     },
 
     syncPlayerState(socket, payload) {
@@ -390,7 +513,7 @@ export function createBattleService(io: SocketServer): BattleService {
       socket.to(roomId).emit("player:state", {
         ...payload,
         hp: player.hp,
-        score: player.score,
+        score: room.score[guestId] ?? 0,
       });
     },
 
@@ -433,7 +556,7 @@ export function createBattleService(io: SocketServer): BattleService {
       scheduleItemRespawn(room);
     },
 
-    castChain(socket, payload) {
+    castChain(socket) {
       const roomId = socket.data.roomId;
       const guestId = socket.data.guestId;
       if (!roomId || !guestId) return;
@@ -482,10 +605,52 @@ export function createBattleService(io: SocketServer): BattleService {
       room.battle.chainTimeouts.set(chain.chainId, fireTimeout);
     },
 
-    handleGameOverClaim(socket) {
+    handleGameOverClaim(socket, payload) {
       const roomId = socket.data.roomId;
       if (!roomId) return;
-      emitError(socket, "game:over is now server authoritative. Wait for room:end.");
+
+      const room = getRoom(roomId);
+      if (!room) return;
+
+      if (room.roundState !== "playing") {
+        console.log(`[duplicate ignored] room=${roomId} round=${room.currentRound} source=game:over`);
+        return;
+      }
+
+      const winnerGuestId = payload.winnerGuestId;
+      if (winnerGuestId && !room.players.some((player) => player.guestId === winnerGuestId)) {
+        emitError(socket, "Invalid winner for game:over.");
+        return;
+      }
+
+      finishRound(room, winnerGuestId, payload.reason ?? "client-game-over", "game:over");
+    },
+
+    handleDisconnect(roomId, guestId) {
+      const room = getRoom(roomId);
+      if (!room) return;
+
+      clearBattleTimers(room);
+
+      const opponent = room.players.find((player) => player.guestId !== guestId && !player.isBot);
+      if (!opponent) return;
+
+      room.roundState = "match_end";
+      room.roundWinnerGuestId = opponent.guestId;
+      room.matchWinnerGuestId = opponent.guestId;
+      syncBattleScores(room);
+
+      io.to(roomId).emit("opponent:left", { roomId });
+      io.to(roomId).emit("match:end", {
+        roomId,
+        winnerGuestId: opponent.guestId,
+        score: { ...room.score },
+        reason: "opponent-left",
+      });
+      io.to(roomId).emit("room:end", { winnerGuestId: opponent.guestId, reason: "opponent-left" });
+      console.log(
+        `[match:end] room=${roomId} winner=${opponent.guestId} score=${JSON.stringify(room.score)} reason=opponent-left`,
+      );
     },
 
     getBattleState(roomId) {

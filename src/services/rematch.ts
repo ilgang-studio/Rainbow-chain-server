@@ -76,12 +76,9 @@ export function createRematchService(io: SocketServer, battle: BattleService): R
         removeRoom(roomId);
 
         const newRoom = createRematchRoom(room);
-        battle.startRoom(newRoom.roomId, { emitInitialEvents: false });
-
-        const initialBattleState = battle.getBattleState(newRoom.roomId);
-        if (!initialBattleState) return;
-        const initialItem = battle.getCurrentItemSpawn(newRoom.roomId);
-        const payload = toRoomStartPayload(newRoom, initialBattleState, initialItem);
+        const roundStart = battle.startRoom(newRoom.roomId, { emitInitialEvents: false });
+        if (!roundStart) return;
+        const payload = toRoomStartPayload(newRoom, roundStart.initialBattleState, roundStart.initialItem);
         console.log(`[rematch:accepted] new room ${newRoom.roomId} seed ${newRoom.seed}`);
 
         for (const player of newRoom.players) {
@@ -101,6 +98,8 @@ export function createRematchService(io: SocketServer, battle: BattleService): R
           playerSocket.emit("room:start", payload);
           console.log(`[rematch:accepted] room:start sent to ${player.guestId}`);
         }
+
+        console.log(`[round:start] room=${newRoom.roomId} round=${newRoom.currentRound} seed=${newRoom.seed} score=${JSON.stringify(newRoom.score)}`);
       } else {
         // Waiting for the other player
         socket.emit("rematch:waiting", { roomId });
