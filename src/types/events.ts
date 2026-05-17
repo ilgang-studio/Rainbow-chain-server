@@ -208,12 +208,31 @@ export interface OpponentLeftPayload {
   roomId: string;
 }
 
+export interface PlayerAwayPayload {
+  roomId: string;
+}
+
+export interface PlayerBackPayload {
+  roomId: string;
+}
+
+export interface PlayerAwayNoticePayload {
+  playerId: string;
+  timeout: number;
+}
+
+export interface PlayerBackNoticePayload {
+  playerId: string;
+}
+
 export interface ClientToServerEvents {
   "queue:join": (payload: QueueJoinPayload) => void;
   "queue:cancel": () => void;
   "room:ready": (payload: RoomReadyPayload) => void;
   "player:move": (payload: PlayerMovePayload) => void;
   "player:state": (payload: PlayerStatePayload) => void;
+  "player:away": (payload: PlayerAwayPayload) => void;
+  "player:back": (payload: PlayerBackPayload) => void;
   "chain:cast": (payload: ChainCastPayload) => void;
   "chain:request": (payload: ChainRequestPayload) => void;
   "item:pickup": (payload: ItemPickupRequestPayload) => void;
@@ -234,6 +253,8 @@ export interface ServerToClientEvents {
   "battle:state": (payload: BattleStatePayload) => void;
   "player:moved": (payload: PlayerMovePayload) => void;
   "player:state": (payload: PlayerStatePayload) => void;
+  "player:away": (payload: PlayerAwayNoticePayload) => void;
+  "player:back": (payload: PlayerBackNoticePayload) => void;
   "item:spawned": (payload: ItemSpawnedPayload) => void;
   "chain:spawned": (payload: ChainSpawnPayload) => void;
   "chain:warning": (payload: ChainWarningPayload) => void;

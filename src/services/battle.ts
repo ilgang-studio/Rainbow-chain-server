@@ -23,6 +23,8 @@ import type {
   ItemPickedPayload,
   ItemSpawnedPayload,
   MatchEndPayload,
+  PlayerAwayPayload,
+  PlayerBackPayload,
   PlayerStatePayload,
   RoundEndPayload,
   ServerToClientEvents,
@@ -35,6 +37,7 @@ type ServerSocket = Socket<ClientToServerEvents, ServerToClientEvents, InterServ
 const DEFAULT_HP = 3;
 const MATCH_WIN_SCORE = 2;
 const NEXT_ROUND_DELAY_MS = 2_000;
+const AWAY_TIMEOUT_MS = 10_000;
 const SPAWN_MARGIN = 96;
 
 export interface BattleService {
@@ -44,6 +47,8 @@ export interface BattleService {
   ) => { initialBattleState: BattleStatePayload; initialItem: ItemSpawnedPayload | null } | null;
   disposeRoom: (roomId: string) => void;
   syncPlayerState: (socket: ServerSocket, payload: PlayerStatePayload) => void;
+  handlePlayerAway: (socket: ServerSocket, payload: PlayerAwayPayload) => void;
+  handlePlayerBack: (socket: ServerSocket, payload: PlayerBackPayload) => void;
   handleItemPickup: (socket: ServerSocket, payload: ItemPickupRequestPayload) => void;
   castChain: (socket: ServerSocket) => void;
   handleGameOverClaim: (socket: ServerSocket, payload: GameOverClaimPayload) => void;
@@ -236,6 +241,12 @@ function createRandomEnemyLaneChain(room: Room, ownerGuestId: string, chainType:
 }
 
 export function createBattleService(io: SocketServer): BattleService {
+  const awayTimeouts = new Map<string, NodeJS.Timeout>();
+
+  function awayKey(roomId: string, guestId: string): string {
+    return `${roomId}:${guestId}`;
+  }
+
   function emitError(socket: ServerSocket, message: string): void {
     socket.emit("error", { message });
   }
@@ -248,6 +259,23 @@ export function createBattleService(io: SocketServer): BattleService {
     const room = getRoom(roomId);
     if (!room?.battle || room.roundState !== "playing" || room.battle.status !== "active") return undefined;
     return room;
+  }
+
+  function clearAwayTimer(roomId: string, guestId: string): void {
+    const key = awayKey(roomId, guestId);
+    const timeout = awayTimeouts.get(key);
+    if (timeout) {
+      clearTimeout(timeout);
+      awayTimeouts.delete(key);
+    }
+  }
+
+  function clearAwayTimersForRoom(roomId: string): void {
+    for (const [key, timeout] of awayTimeouts.entries()) {
+      if (!key.startsWith(`${roomId}:`)) continue;
+      clearTimeout(timeout);
+      awayTimeouts.delete(key);
+    }
   }
 
   function clearBattleTimers(room: Room): void {
@@ -266,6 +294,8 @@ export function createBattleService(io: SocketServer): BattleService {
       clearTimeout(room.nextRoundTimeout);
       delete room.nextRoundTimeout;
     }
+
+    clearAwayTimersForRoom(room.roomId);
   }
 
   function syncBattleScores(room: Room): void {
@@ -556,6 +586,49 @@ export function createBattleService(io: SocketServer): BattleService {
       scheduleItemRespawn(room);
     },
 
+    handlePlayerAway(socket, payload) {
+      const roomId = socket.data.roomId;
+      const guestId = socket.data.guestId;
+      if (!roomId || !guestId || payload.roomId !== roomId) return;
+
+      const room = getRoom(roomId);
+      if (!room || room.roundState !== "playing") return;
+
+      const key = awayKey(roomId, guestId);
+      if (awayTimeouts.has(key)) return;
+
+      io.to(roomId).emit("player:away", { playerId: guestId, timeout: AWAY_TIMEOUT_MS / 1000 });
+      console.log(`[player:away] room=${roomId} player=${guestId} timeout=${AWAY_TIMEOUT_MS}`);
+
+      const timeout = setTimeout(() => {
+        awayTimeouts.delete(key);
+
+        const currentRoom = getRoom(roomId);
+        if (!currentRoom || currentRoom.roundState !== "playing") return;
+
+        const winnerGuestId = currentRoom.players.find((player) => player.guestId !== guestId)?.guestId ?? null;
+        finishRound(currentRoom, winnerGuestId, "away-timeout", "player:away-timeout");
+      }, AWAY_TIMEOUT_MS);
+
+      awayTimeouts.set(key, timeout);
+    },
+
+    handlePlayerBack(socket, payload) {
+      const roomId = socket.data.roomId;
+      const guestId = socket.data.guestId;
+      if (!roomId || !guestId || payload.roomId !== roomId) return;
+
+      const room = getRoom(roomId);
+      if (!room || room.roundState !== "playing") return;
+
+      const key = awayKey(roomId, guestId);
+      if (!awayTimeouts.has(key)) return;
+
+      clearAwayTimer(roomId, guestId);
+      io.to(roomId).emit("player:back", { playerId: guestId });
+      console.log(`[player:back] room=${roomId} player=${guestId}`);
+    },
+
     castChain(socket) {
       const roomId = socket.data.roomId;
       const guestId = socket.data.guestId;
@@ -630,6 +703,7 @@ export function createBattleService(io: SocketServer): BattleService {
       const room = getRoom(roomId);
       if (!room) return;
 
+      clearAwayTimer(roomId, guestId);
       clearBattleTimers(room);
 
       const opponent = room.players.find((player) => player.guestId !== guestId && !player.isBot);

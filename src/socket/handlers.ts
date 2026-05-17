@@ -54,6 +54,14 @@ export function registerSocketHandlers(
     battle.syncPlayerState(socket, payload);
   });
 
+  socket.on("player:away", (payload) => {
+    battle.handlePlayerAway(socket, payload);
+  });
+
+  socket.on("player:back", (payload) => {
+    battle.handlePlayerBack(socket, payload);
+  });
+
   socket.on("chain:cast", () => {
     battle.castChain(socket);
   });
