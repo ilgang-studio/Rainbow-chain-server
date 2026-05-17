@@ -11,6 +11,7 @@ import {
   rooms,
   toRoomStartPayload,
 } from "./roomManager.js";
+import { getAuthorizedRoomForSocket } from "./roomAccess.js";
 import type {
   ClientToServerEvents,
   InterServerEvents,
@@ -306,6 +307,12 @@ export function createMatchmakingService(io: SocketServer, battle: BattleService
       const session = sessions.get(guestId);
       if (!session || session.roomId !== roomId) {
         emitError(socket, "Room mismatch for room:ready.");
+        return;
+      }
+
+      const access = getAuthorizedRoomForSocket(socket, roomId);
+      if ("error" in access) {
+        emitError(socket, access.error);
         return;
       }
 

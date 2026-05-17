@@ -2,6 +2,7 @@ import type { Server, Socket } from "socket.io";
 import { getRoom, createRematchRoom, removeRoom, toRoomStartPayload } from "./roomManager.js";
 import { sessions } from "./matchmaking.js";
 import type { BattleService } from "./battle.js";
+import { getAuthorizedRoomForSocket } from "./roomAccess.js";
 import type {
   ClientToServerEvents,
   InterServerEvents,
@@ -51,14 +52,14 @@ export function createRematchService(io: SocketServer, battle: BattleService): R
 
   return {
     requestRematch(socket, { roomId }) {
-      const guestId = socket.data.guestId;
-      if (!guestId) return;
+      const access = getAuthorizedRoomForSocket(socket, roomId);
+      if ("error" in access) {
+        socket.emit("error", { message: access.error });
+        return;
+      }
 
-      const room = getRoom(roomId);
-      if (!room) return;
-
+      const { guestId, room } = access;
       const humanPlayers = room.players.filter((p) => !p.isBot);
-      if (!humanPlayers.some((p) => p.guestId === guestId)) return;
 
       if (!rematchRequests.has(roomId)) {
         rematchRequests.set(roomId, new Set());
@@ -119,9 +120,13 @@ export function createRematchService(io: SocketServer, battle: BattleService): R
     },
 
     cancelRematch(socket, { roomId }) {
-      const guestId = socket.data.guestId;
-      if (!guestId) return;
+      const access = getAuthorizedRoomForSocket(socket, roomId);
+      if ("error" in access) {
+        socket.emit("error", { message: access.error });
+        return;
+      }
 
+      const { guestId } = access;
       const requests = rematchRequests.get(roomId);
       if (!requests?.has(guestId)) return;
 
