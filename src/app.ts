@@ -38,7 +38,14 @@ export function createApp() {
       });
     }
 
-    const secret = getSocketJwtSecret();
+    let secret: string;
+    try {
+      secret = getSocketJwtSecret();
+    } catch (err) {
+      console.error("[auth/socket-guest] Server misconfiguration:", (err as Error).message);
+      return res.status(500).json({ error: "SERVER_CONFIG_MISSING" });
+    }
+
     const token = jwt.sign(
       {
         sub: parsed.data.guestId,
