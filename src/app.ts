@@ -42,19 +42,27 @@ export function createApp() {
     try {
       secret = getSocketJwtSecret();
     } catch (err) {
-      console.error("[auth/socket-guest] Server misconfiguration:", (err as Error).message);
+      console.error("[AUTH] Missing SOCKET_JWT_SECRET:", (err as Error).message);
       return res.status(500).json({ error: "SERVER_CONFIG_MISSING" });
     }
 
-    const token = jwt.sign(
-      {
-        sub: parsed.data.guestId,
-        guestId: parsed.data.guestId,
-        nickname: parsed.data.nickname,
-      },
-      secret,
-      { expiresIn: "12h" },
-    );
+    let token: string;
+    try {
+      token = jwt.sign(
+        {
+          sub: parsed.data.guestId,
+          guestId: parsed.data.guestId,
+          nickname: parsed.data.nickname,
+        },
+        secret,
+        { expiresIn: "12h" },
+      );
+    } catch (err) {
+      console.error("[SOCKET_AUTH] JWT sign failed:", (err as Error).message);
+      return res.status(500).json({ error: "TOKEN_SIGN_FAILED" });
+    }
+
+    console.log("[SOCKET_AUTH] Guest token issued for guestId:", parsed.data.guestId);
 
     return res.json({
       token,
