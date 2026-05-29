@@ -26,7 +26,7 @@ import type { BattleService } from "./battle.js";
 type SocketServer = Server<ClientToServerEvents, ServerToClientEvents, InterServerEvents, SocketData>;
 type ServerSocket = Socket<ClientToServerEvents, ServerToClientEvents, InterServerEvents, SocketData>;
 
-const AI_FALLBACK_MS = 20_000;
+const AI_FALLBACK_MS = 10_000;
 
 export const sessions = new Map<string, Session>();
 export const queue: QueueEntry[] = [];
